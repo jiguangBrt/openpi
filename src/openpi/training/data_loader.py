@@ -137,9 +137,11 @@ def create_torch_dataset(
     if repo_id == "fake":
         return FakeDataset(model_config, num_samples=1024)
 
-    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id)
-    dataset = lerobot_dataset.LeRobotDataset(
+    dataset_meta = lerobot_dataset.LeRobotDatasetMetadata(repo_id, root=data_config.repo_root)
+    dataset_cls = _LocalLeRobotDataset if data_config.repo_root is not None else lerobot_dataset.LeRobotDataset
+    dataset = dataset_cls(
         data_config.repo_id,
+        root=data_config.repo_root,
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -149,6 +151,23 @@ def create_torch_dataset(
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
 
     return dataset
+
+
+class _LocalLeRobotDataset(lerobot_dataset.LeRobotDataset):
+    """Loads local LeRobot data with explicit features for cross-version Parquet compatibility."""
+
+    def load_hf_dataset(self):
+        features = lerobot_dataset.get_hf_features_from_features(self.meta.features)
+        if self.episodes is None:
+            hf_dataset = lerobot_dataset.load_dataset(
+                "parquet", data_dir=str(self.root / "data"), split="train", features=features
+            )
+        else:
+            files = [str(self.root / self.meta.get_data_file_path(ep_idx)) for ep_idx in self.episodes]
+            hf_dataset = lerobot_dataset.load_dataset("parquet", data_files=files, split="train", features=features)
+
+        hf_dataset.set_transform(lerobot_dataset.hf_transform_to_torch)
+        return hf_dataset
 
 
 def create_rlds_dataset(
