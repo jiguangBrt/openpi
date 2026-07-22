@@ -324,6 +324,38 @@ class LeRobotUR5DataConfig(DataConfigFactory):
 
 
 @dataclasses.dataclass(frozen=True)
+class LeRobotUR5EndPoseDataConfig(DataConfigFactory):
+    """Configure absolute UR5e ``base -> tool0`` end-pose state and actions."""
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "state": "state",
+                        "image": "image",
+                        "wrist_image": "wrist_image",
+                        "actions": "actions",
+                        "prompt": "prompt",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[ur5_policy.UR5EndPoseInputs(model_type=model_config.model_type)],
+            outputs=[ur5_policy.UR5EndPoseOutputs()],
+        )
+
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=ModelTransformFactory()(model_config),
+        )
+
+
+@dataclasses.dataclass(frozen=True)
 class LeRobotLiberoDataConfig(DataConfigFactory):
     """
     This config is used to configure transforms that are applied at various parts of the data pipeline.
@@ -843,6 +875,54 @@ _CONFIGS = [
         batch_size=8,
         save_interval=1_000,
         keep_period=5_000,
+    ),
+    TrainConfig(
+        name="pi05_ur_ping_pong_endpose",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotUR5EndPoseDataConfig(
+            repo_id="ur_pick_up_ping_pong_endpose",
+            base_config=DataConfig(
+                repo_root=str(
+                    pathlib.Path(__file__).resolve().parents[4] / "lerobot_data" / "ur_pick_up_ping_pong_endpose"
+                ),
+                prompt_from_task=True,
+            ),
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=10_000,
+        batch_size=8,
+        save_interval=1_000,
+        keep_period=5_000,
+        policy_metadata={
+            "robot": "UR5e",
+            "action_space": "absolute_endpose",
+            "pose": "base_to_tool0",
+            "pose_layout": ["x", "y", "z", "rx", "ry", "rz", "gripper"],
+            "position_unit": "m",
+            "rotation_representation": "rotvec_rad",
+            "training_action_transform": "none_absolute_pose",
+        },
     ),
     #
     # Fine-tuning Aloha configs.
