@@ -896,7 +896,7 @@ _CONFIGS = [
         data=LeRobotMarvinProDataConfig(
             repo_id="marvinpro_raw_data_trans",
             base_config=DataConfig(
-                repo_root="/home/jh/REMOTE_DATA/MarvinPro/MarvinPro_raw_data_trans/lerobot_dataset",
+                repo_root="/home/jh/TianJi_data_collector/MarvinPro_raw_data_trans/lerobot_dataset",
                 prompt_from_task=True,
             ),
             use_delta_joint_actions=True,
