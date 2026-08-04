@@ -305,6 +305,7 @@ tmux new -s pi05_endpose_train
 ```bash
 cd /mnt/reacher-fast/openpi_ur_pp_202607/repo
 
+CUDA_VISIBLE_DEVICES=6,7 \
 HF_DATASETS_CACHE=/tmp/openpi-endpose-hf-cache \
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
 uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \
@@ -312,7 +313,11 @@ uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \
   --no-wandb-enabled
 ```
 
-首次启动不要添加 `--overwrite`，同名实验存在时让程序安全退出。首次运行可能下载尚未缓存的 `pi05_base` 权重。
+首次启动不要添加 `--overwrite`，同名实验存在时让程序安全退出。配置从官方
+`gs://openpi-assets/checkpoints/pi05_base/params` 初始化；本地未缓存时会下载到默认路径
+`~/.cache/openpi/openpi-assets/checkpoints/pi05_base/params`。
+
+该配置每 5,000 步保存一次，并在最后一步强制保存，因此 10,000 步训练正常会得到 `5000` 和 `9999` 两个 checkpoint。
 
 ### 停止与恢复
 
@@ -321,6 +326,7 @@ uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \
 ```bash
 cd /mnt/reacher-fast/openpi_ur_pp_202607/repo
 
+CUDA_VISIBLE_DEVICES=6,7 \
 HF_DATASETS_CACHE=/tmp/openpi-endpose-hf-cache \
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
 uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \
@@ -336,6 +342,7 @@ uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \
 保留旧 checkpoint 时更换实验名：
 
 ```bash
+CUDA_VISIBLE_DEVICES=6,7 \
 HF_DATASETS_CACHE=/tmp/openpi-endpose-hf-cache \
 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 \
 uv run --no-sync scripts/train.py pi05_ur_ping_pong_endpose \

@@ -142,6 +142,7 @@ def create_torch_dataset(
     dataset = dataset_cls(
         data_config.repo_id,
         root=data_config.repo_root,
+        episodes=None if data_config.episodes is None else list(data_config.episodes),
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
