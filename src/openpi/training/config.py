@@ -5,6 +5,7 @@ from collections.abc import Sequence
 import dataclasses
 import difflib
 import logging
+import os
 import pathlib
 from typing import Any, Literal, Protocol, TypeAlias
 
@@ -34,6 +35,19 @@ import openpi.transforms as _transforms
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
 Filter: TypeAlias = nnx.filterlib.Filter
+
+
+def _local_dataset_root(repo_id: str) -> pathlib.Path:
+    """Resolve local datasets across workstation and training-server layouts."""
+    if data_root := os.environ.get("OPENPI_DATA_ROOT"):
+        return pathlib.Path(data_root).expanduser().resolve() / repo_id
+
+    workspace_root = pathlib.Path(__file__).resolve().parents[4]
+    candidates = (
+        workspace_root / "lerobot_data" / repo_id,
+        workspace_root / "datasets" / repo_id,
+    )
+    return next((path for path in candidates if path.is_dir()), candidates[0])
 
 
 @dataclasses.dataclass(frozen=True)
@@ -73,6 +87,8 @@ class DataConfig:
     asset_id: str | None = None
     # Contains precomputed normalization stats. If None, normalization will not be performed.
     norm_stats: dict[str, _transforms.NormStats] | None = None
+    # Optional episode subset, used to isolate train/test splits in local datasets.
+    episodes: Sequence[int] | None = None
 
     # Used to adopt the inputs from a dataset specific format to a common format
     # which is expected by the data transforms.
@@ -933,8 +949,9 @@ _CONFIGS = [
         ),
         data=LeRobotMarvinProDataConfig(
             repo_id="stack_red_cones",
+            assets=AssetsConfig(assets_dir=str(_local_dataset_root("stack_red_cones").parent)),
             base_config=DataConfig(
-                repo_root=str(pathlib.Path(__file__).resolve().parents[4] / "lerobot_data" / "stack_red_cones"),
+                repo_root=str(_local_dataset_root("stack_red_cones")),
                 episodes=tuple(range(103)),
                 prompt_from_task=True,
             ),

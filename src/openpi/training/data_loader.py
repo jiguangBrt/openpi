@@ -142,6 +142,7 @@ def create_torch_dataset(
     dataset = dataset_cls(
         data_config.repo_id,
         root=data_config.repo_root,
+        episodes=None if data_config.episodes is None else list(data_config.episodes),
         delta_timestamps={
             key: [t / dataset_meta.fps for t in range(action_horizon)] for key in data_config.action_sequence_keys
         },
@@ -155,6 +156,20 @@ def create_torch_dataset(
 
 class _LocalLeRobotDataset(lerobot_dataset.LeRobotDataset):
     """Loads local LeRobot data with explicit features for cross-version Parquet compatibility."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # LeRobot stores selected episode boundaries densely, while __getitem__ uses global episode indices.
+        self._episode_position = (
+            {episode_index: position for position, episode_index in enumerate(self.episodes)}
+            if self.episodes is not None
+            else None
+        )
+
+    def _get_query_indices(self, idx: int, ep_idx: int):
+        if self._episode_position is not None:
+            ep_idx = self._episode_position[ep_idx]
+        return super()._get_query_indices(idx, ep_idx)
 
     def load_hf_dataset(self):
         features = lerobot_dataset.get_hf_features_from_features(self.meta.features)
