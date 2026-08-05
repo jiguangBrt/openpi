@@ -157,6 +157,24 @@ def create_torch_dataset(
 class _LocalLeRobotDataset(lerobot_dataset.LeRobotDataset):
     """Loads local LeRobot data with explicit features for cross-version Parquet compatibility."""
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # LeRobot builds episode_data_index densely for the selected episodes, but
+        # __getitem__ passes the original (global) episode index to
+        # _get_query_indices.  Keep an explicit global-to-local mapping so splits
+        # that do not start at episode zero (for example, a held-out test split)
+        # index the correct boundaries.
+        self._episode_position = (
+            {episode_index: position for position, episode_index in enumerate(self.episodes)}
+            if self.episodes is not None
+            else None
+        )
+
+    def _get_query_indices(self, idx: int, ep_idx: int):
+        if self._episode_position is not None:
+            ep_idx = self._episode_position[ep_idx]
+        return super()._get_query_indices(idx, ep_idx)
+
     def load_hf_dataset(self):
         features = lerobot_dataset.get_hf_features_from_features(self.meta.features)
         if self.episodes is None:
