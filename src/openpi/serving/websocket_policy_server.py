@@ -9,6 +9,8 @@ from openpi_client import msgpack_numpy
 import websockets.asyncio.server as _server
 import websockets.frames
 
+from openpi.policies import policy as _policy
+
 logger = logging.getLogger(__name__)
 
 
@@ -55,10 +57,13 @@ class WebsocketPolicyServer:
         while True:
             try:
                 start_time = time.monotonic()
-                obs = msgpack_numpy.unpackb(await websocket.recv())
+                request = msgpack_numpy.unpackb(await websocket.recv())
 
                 infer_time = time.monotonic()
-                action = self._policy.infer(obs)
+                if isinstance(request, dict) and request.get("request_type") == "rtc_v1":
+                    action = self._infer_rtc(request)
+                else:
+                    action = self._policy.infer(request)
                 infer_time = time.monotonic() - infer_time
 
                 action["server_timing"] = {
@@ -81,6 +86,26 @@ class WebsocketPolicyServer:
                     reason="Internal server error. Traceback included in previous frame.",
                 )
                 raise
+
+    def _infer_rtc(self, request: dict) -> dict:
+        id_fields = {
+            key: request.get(key)
+            for key in ("request_id", "plan_id", "timeline_version", "checkpoint_id")
+        }
+        try:
+            infer_rtc = getattr(self._policy, "infer_rtc", None)
+            if infer_rtc is None:
+                raise _policy.RtcPolicyError("served policy has no RTC inference method")
+            result = infer_rtc(request)
+            return {"ok": True, **id_fields, **result}
+        except (_policy.RtcPolicyError, TypeError, ValueError) as exc:
+            logger.warning("Rejected RTC request %s: %s", id_fields.get("request_id"), exc)
+            return {
+                "ok": False,
+                **id_fields,
+                "error_code": "invalid_rtc_request",
+                "error": str(exc),
+            }
 
 
 def _health_check(connection: _server.ServerConnection, request: _server.Request) -> _server.Response | None:
