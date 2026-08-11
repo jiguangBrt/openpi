@@ -5,7 +5,7 @@ MarvinPro checkpoint and enough GPU memory before enabling a real RTC merge on t
 
 ## Scope already checked locally
 
-- Official exponential prefix weights for `d_pred=4`, `s=4`, `H=10`.
+- Official exponential prefix weights for `d_pred=2`, `s=6`, `H=10`.
 - Reverse-time VJP correction sign, zero-weight behavior, and finite `t=0/1` endpoints.
 - MarvinPro absolute action prefix through joint-delta conversion, normalization, 16-to-32 padding, and the complete
   output inverse transform.
@@ -56,7 +56,7 @@ assert policy.metadata["rtc"]["protocol"] == "rtc_v1"
 
 observation = marvinpro_policy.make_marvinpro_example()
 state = np.asarray(observation["state"], dtype=np.float32)
-prefix = np.repeat(state[None, :], 6, axis=0)
+prefix = np.repeat(state[None, :], 4, axis=0)
 
 for d_pred in (4, 4, 1, 2, 3, 4):
     request = {
@@ -68,7 +68,7 @@ for d_pred in (4, 4, 1, 2, 3, 4):
         "observation": observation,
         "old_remaining_actions_absolute": prefix,
         "d_pred": d_pred,
-        "s": 4,
+        "s": 6,
         "schedule": "exp",
         "beta": 5.0,
         "warmup": d_pred == 4,
@@ -110,7 +110,8 @@ uv run scripts/serve_policy.py \
 
 From a second process, send two discarded warmups followed by at least 20 valid `rtc_v1` requests. Verify:
 
-- metadata advertises `rtc_v1`, H=10, native action dim 16, model action dim 32, and maximum `d_pred=4`;
+- metadata advertises `rtc_v1`, H=10, execution horizon 6, native action dim 16, model action dim 32, and maximum
+  `d_pred=4`;
 - response IDs exactly match request, and actions are finite `(10, 16)`;
 - invalid shape, `d_pred=5`, wrong `s`, or non-exponential schedule returns `ok=false` without closing the socket;
 - record wall, preprocess, denoise, postprocess, and server latency for every stable request;
@@ -154,3 +155,19 @@ fallback reason. Any RTC failure must keep synchronized fallback latched for the
 - Legacy vanilla inference remained compatible: first compile took 7.52 s; the next call took 302.78 ms wall and
   85.60 ms server, with finite `(10, 16)` actions.
 - Not covered here: robot shadow/tracking/synchronized/two-chunk merge stages and their physical checkpoint evidence.
+
+## 2026-08-11 execution horizon 6 validation record
+
+- Scope: remote commit `b0d6366` plus the four listed uncommitted `s=6` protocol/test/documentation files. No model
+  checkpoint, weight, unrelated repository path, GPU process, or tmux session was modified.
+- Static/CPU: the selected suite passed with `21 passed, 2 deselected`; Ruff passed. The matching deployment client
+  passed all 53 unit tests.
+- Direct checkpoint test on physical GPU 5: first cache/JIT call took 3954.34 ms. Stable `d_pred=1..4` calls took
+  109.30-116.16 ms, returned finite `(10,16)` actions, and did not recompile per delay value.
+- Persistent service runs in `marvinpro_rtc:0.0` on GPU 5 and port 8000. Metadata advertises execution horizon 6,
+  prefix `(4,16)`, and maximum delay 4. An old `s=4/(6,16)` request was rejected structurally; a following valid
+  request on the same connection succeeded.
+- The first 20-request wall-latency sample had transport outliers (`p95=808.58 ms`, `max=1230.51 ms`) despite server
+  `p95=120.52 ms`, so it failed the delay bound. The immediate stable repeat measured 225.34-413.38 ms wall and
+  105.34-125.27 ms server, which gives `d_pred=4` with the 50 ms guard. Robot validation must restart with continuous
+  shadow and must fall back rather than merge if the current warmup estimate exceeds four steps.

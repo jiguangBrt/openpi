@@ -47,11 +47,11 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
         ],
     )
     state = np.linspace(-0.7, 0.7, 16, dtype=np.float32)
-    old_prefix = np.stack([state + index * 0.01 for index in range(6)]).astype(np.float32)
+    old_prefix = np.stack([state + index * 0.01 for index in range(4)]).astype(np.float32)
     request = {
         "schedule": "exp",
         "d_pred": 2,
-        "s": 4,
+        "s": 6,
         "beta": 5.0,
         "observation": {
             "state": state,
@@ -66,10 +66,11 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
 
     result = policy.infer_rtc(request)
 
-    expected = np.concatenate([old_prefix, np.repeat(old_prefix[-1:], 4, axis=0)])
+    expected = np.concatenate([old_prefix, np.repeat(old_prefix[-1:], 6, axis=0)])
     assert result["actions"].shape == (10, 16)
     np.testing.assert_allclose(result["actions"], expected, atol=1e-5)
     assert policy.metadata["rtc"]["protocol"] == "rtc_v1"
+    assert policy.metadata["rtc"]["execution_horizon"] == 6
     assert set(result["rtc_timing"]) == {
         "preprocess_ms",
         "denoise_ms",

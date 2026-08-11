@@ -51,10 +51,10 @@ def test_pi0_all_lora():
 
 
 def test_rtc_exponential_prefix_weights():
-    weights = np.asarray(get_rtc_prefix_weights(4, 6, 10))
+    weights = np.asarray(get_rtc_prefix_weights(2, 4, 10))
     np.testing.assert_allclose(
         weights,
-        np.array([1.0, 1.0, 1.0, 1.0, 0.367706, 0.076746, 0.0, 0.0, 0.0, 0.0]),
+        np.array([1.0, 1.0, 0.367706, 0.076746, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
         atol=1e-5,
     )
 

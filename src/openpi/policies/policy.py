@@ -83,7 +83,7 @@ class Policy(BasePolicy):
                 "action_horizon": 10,
                 "native_action_dim": 16,
                 "model_action_dim": 32,
-                "execution_horizon": 4,
+                "execution_horizon": 6,
                 "max_predicted_delay": 4,
                 "prefix_attention_schedule": "exp",
             }
@@ -138,8 +138,8 @@ class Policy(BasePolicy):
         execution_horizon = request.get("s")
         if not isinstance(predicted_delay, int) or not 1 <= predicted_delay <= 4:
             raise RtcPolicyError("rtc_v1 d_pred must be an integer in 1..4")
-        if execution_horizon != 4:
-            raise RtcPolicyError("rtc_v1 s must be 4")
+        if execution_horizon != 6:
+            raise RtcPolicyError("rtc_v1 s must be 6")
         max_guidance_weight = request.get("beta", 5.0)
         if not isinstance(max_guidance_weight, int | float) or not 0 < max_guidance_weight <= 10:
             raise RtcPolicyError("rtc_v1 beta must be in (0, 10]")
@@ -147,14 +147,14 @@ class Policy(BasePolicy):
         if not isinstance(observation_input, dict):
             raise RtcPolicyError("RTC observation must be a dictionary")
         old_remaining = np.asarray(request.get("old_remaining_actions_absolute"), dtype=np.float32)
-        if old_remaining.shape != (6, 16) or not np.isfinite(old_remaining).all():
+        if old_remaining.shape != (4, 16) or not np.isfinite(old_remaining).all():
             raise RtcPolicyError(
-                f"old_remaining_actions_absolute must have finite shape (6, 16), got {old_remaining.shape}"
+                f"old_remaining_actions_absolute must have finite shape (4, 16), got {old_remaining.shape}"
             )
 
         rtc_started = preprocess_started = time.monotonic()
         padded_prefix = np.concatenate(
-            [old_remaining, np.repeat(old_remaining[-1:, :], repeats=4, axis=0)],
+            [old_remaining, np.repeat(old_remaining[-1:, :], repeats=6, axis=0)],
             axis=0,
         )
         inputs = jax.tree.map(lambda x: x, observation_input)
