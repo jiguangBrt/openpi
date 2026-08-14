@@ -24,6 +24,7 @@ JAX_PLATFORMS=cpu PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest -q \
   src/openpi/models/pi0_test.py \
   src/openpi/policies/policy_test.py \
   src/openpi/serving/websocket_policy_server_test.py \
+  packages/openpi-client/src/openpi_client/websocket_client_policy_test.py \
   src/openpi/transforms_test.py \
   -m 'not manual'
 ```
@@ -114,8 +115,10 @@ From a second process, send two discarded warmups followed by at least 20 valid 
   `d_pred=4`;
 - response IDs exactly match request, and actions are finite `(10, 16)`;
 - invalid shape, `d_pred=5`, wrong `s`, or non-exponential schedule returns `ok=false` without closing the socket;
-- record wall, preprocess, denoise, postprocess, and server latency for every stable request;
-- `ceil(7.5 * (max(last 20 stable wall seconds) + 0.05)) <= 4`.
+- record observation preparation, request serialization, transport round trip, estimated network round trip,
+  server deserialization/queue/inference, RTC preprocess/denoise/postprocess, response decode, and bridge stage/merge;
+- compute `d_pred` from the conservative p95 of stable samples at the current 5 Hz knot rate. Samples for which
+  `ceil(5 * (wall_seconds + 0.05)) > 4` are link faults and must not enter the stable estimator distribution.
 
 Do not proceed if the last condition fails. The deployment client must use synchronized mode for that server/checkpoint.
 
@@ -171,3 +174,14 @@ fallback reason. Any RTC failure must keep synchronized fallback latched for the
   `p95=120.52 ms`, so it failed the delay bound. The immediate stable repeat measured 225.34-413.38 ms wall and
   105.34-125.27 ms server, which gives `d_pred=4` with the 50 ms guard. Robot validation must restart with continuous
   shadow and must fall back rather than merge if the current warmup estimate exceeds four steps.
+
+## 2026-08-14 latency segmentation CPU validation
+
+- Added client request serialization, transport round trip, estimated network residual, response decode, and total
+  timing fields. The network value is explicitly an estimate after subtracting measured server processing stages.
+- Added server request deserialization, single-worker queue, inference, response serialization, and total-before-response
+  timing. Inference remains serialized; no model, checkpoint, or RTC sampler behavior changed.
+- CPU-only targeted tests passed. The selected deterministic CPU suite completed with `23 passed, 2 deselected`,
+  and Ruff passed for the changed Python files.
+- GPU sampler/JIT, persistent WebSocket latency, queue behavior under real inference load, and all robot stages remain
+  pending; do not treat this CPU record as a latency-budget validation.

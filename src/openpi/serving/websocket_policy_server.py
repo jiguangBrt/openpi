@@ -1,4 +1,5 @@
 import asyncio
+import concurrent.futures
 import http
 import logging
 import time
@@ -31,6 +32,10 @@ class WebsocketPolicyServer:
         self._host = host
         self._port = port
         self._metadata = metadata or {}
+        self._inference_executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="openpi-policy",
+        )
         logging.getLogger("websockets.server").setLevel(logging.INFO)
 
     def serve_forever(self) -> None:
@@ -56,24 +61,37 @@ class WebsocketPolicyServer:
         prev_total_time = None
         while True:
             try:
+                payload = await websocket.recv()
                 start_time = time.monotonic()
-                request = msgpack_numpy.unpackb(await websocket.recv())
+                deserialize_started = time.monotonic()
+                request = msgpack_numpy.unpackb(payload)
+                request_deserialization_ms = (time.monotonic() - deserialize_started) * 1000.0
 
-                infer_time = time.monotonic()
-                if isinstance(request, dict) and request.get("request_type") == "rtc_v1":
-                    action = self._infer_rtc(request)
-                else:
-                    action = self._policy.infer(request)
-                infer_time = time.monotonic() - infer_time
+                queued_at = time.monotonic()
+                action, queue_ms, infer_ms = await asyncio.get_running_loop().run_in_executor(
+                    self._inference_executor,
+                    self._infer_queued,
+                    request,
+                    queued_at,
+                )
 
                 action["server_timing"] = {
-                    "infer_ms": infer_time * 1000,
+                    "request_deserialization_ms": request_deserialization_ms,
+                    "queue_ms": queue_ms,
+                    "infer_ms": infer_ms,
+                    "total_before_response_ms": (time.monotonic() - start_time) * 1000.0,
                 }
                 if prev_total_time is not None:
                     # We can only record the last total time since we also want to include the send time.
                     action["server_timing"]["prev_total_ms"] = prev_total_time * 1000
 
-                await websocket.send(packer.pack(action))
+                serialize_started = time.monotonic()
+                response = packer.pack(action)
+                action["server_timing"]["response_serialization_ms"] = (
+                    time.monotonic() - serialize_started
+                ) * 1000.0
+                response = packer.pack(action)
+                await websocket.send(response)
                 prev_total_time = time.monotonic() - start_time
 
             except websockets.ConnectionClosed:
@@ -86,6 +104,16 @@ class WebsocketPolicyServer:
                     reason="Internal server error. Traceback included in previous frame.",
                 )
                 raise
+
+    def _infer_queued(self, request, queued_at: float) -> tuple[dict, float, float]:
+        infer_started = time.monotonic()
+        queue_ms = (infer_started - queued_at) * 1000.0
+        if isinstance(request, dict) and request.get("request_type") == "rtc_v1":
+            action = self._infer_rtc(request)
+        else:
+            action = self._policy.infer(request)
+        infer_ms = (time.monotonic() - infer_started) * 1000.0
+        return action, queue_ms, infer_ms
 
     def _infer_rtc(self, request: dict) -> dict:
         id_fields = {
