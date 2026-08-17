@@ -16,6 +16,42 @@ from openpi.shared import array_typing as at
 logger = logging.getLogger("openpi")
 
 
+def get_rtc_prefix_weights(
+    predicted_delay_steps: int | at.Int[at.Array, ""],
+    prefix_attention_horizon: int | at.Int[at.Array, ""],
+    total: int,
+) -> jax.Array:
+    """Official RTC exponential soft mask for a fixed action horizon."""
+    start = jnp.minimum(predicted_delay_steps, prefix_attention_horizon)
+    indices = jnp.arange(total)
+    linear = jnp.clip(
+        (start - 1 - indices) / (prefix_attention_horizon - start + 1) + 1,
+        0,
+        1,
+    )
+    weights = linear * jnp.expm1(linear) / (jnp.e - 1)
+    return jnp.where(indices >= prefix_attention_horizon, 0, weights)
+
+
+def rtc_guided_velocity(denoiser, x_t, old_actions, weights, time, max_guidance_weight):
+    """Apply one reverse-time RTC VJP correction to a denoiser velocity."""
+    time = jnp.asarray(time, dtype=x_t.dtype)
+    max_guidance_weight = jnp.asarray(max_guidance_weight, dtype=x_t.dtype)
+    x_0_hat, vjp_fun, v_t = jax.vjp(denoiser, x_t, has_aux=True)
+    error = (old_actions - x_0_hat) * weights[None, :, None]
+    correction = vjp_fun(error)[0]
+    denominator = time * (1.0 - time)
+    unclipped_weight = (time**2 + (1.0 - time) ** 2) / denominator
+    guidance_weight = jnp.nan_to_num(
+        unclipped_weight,
+        nan=max_guidance_weight,
+        posinf=max_guidance_weight,
+        neginf=0.0,
+    )
+    guidance_weight = jnp.clip(guidance_weight, 0.0, max_guidance_weight)
+    return v_t - guidance_weight * correction
+
+
 def make_attn_mask(input_mask, mask_ar):
     """Adapted from big_vision.
 
@@ -273,6 +309,80 @@ class Pi0(_model.BaseModel):
         def cond(carry):
             x_t, time = carry
             # robust to floating-point error
+            return time >= -dt / 2
+
+        x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
+        return x_0
+
+    def sample_actions_rtc(
+        self,
+        rng: at.KeyArrayLike,
+        observation: _model.Observation,
+        *,
+        old_actions: at.Float[at.Array, "b ah ad"],
+        predicted_delay_steps: int | at.Int[at.Array, ""],
+        execution_horizon: int | at.Int[at.Array, ""],
+        max_guidance_weight: float | at.Float[at.Array, ""] = 5.0,
+        num_steps: int | at.Int[at.Array, ""] = 10,
+        noise: at.Float[at.Array, "b ah ad"] | None = None,
+    ) -> _model.Actions:
+        """Sample an RTC-guided chunk using OpenPI's t=1 noise to t=0 data convention."""
+        observation = _model.preprocess_observation(None, observation, train=False)
+        dt = -1.0 / num_steps
+        batch_size = observation.state.shape[0]
+        if noise is None:
+            noise = jax.random.normal(rng, (batch_size, self.action_horizon, self.action_dim))
+        assert old_actions.shape == noise.shape, (old_actions.shape, noise.shape)
+
+        prefix_tokens, prefix_mask, prefix_ar_mask = self.embed_prefix(observation)
+        prefix_attn_mask = make_attn_mask(prefix_mask, prefix_ar_mask)
+        positions = jnp.cumsum(prefix_mask, axis=1) - 1
+        _, kv_cache = self.PaliGemma.llm([prefix_tokens, None], mask=prefix_attn_mask, positions=positions)
+        weights = get_rtc_prefix_weights(
+            predicted_delay_steps,
+            self.action_horizon - execution_horizon,
+            self.action_horizon,
+        )
+
+        def velocity(x_t, time):
+            suffix_tokens, suffix_mask, suffix_ar_mask, adarms_cond = self.embed_suffix(
+                observation, x_t, jnp.broadcast_to(time, batch_size)
+            )
+            suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
+            prefix_to_suffix_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
+            full_attn_mask = jnp.concatenate([prefix_to_suffix_mask, suffix_attn_mask], axis=-1)
+            suffix_positions = (
+                jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
+            )
+            (prefix_out, suffix_out), _ = self.PaliGemma.llm(
+                [None, suffix_tokens],
+                mask=full_attn_mask,
+                positions=suffix_positions,
+                kv_cache=kv_cache,
+                adarms_cond=[None, adarms_cond],
+            )
+            assert prefix_out is None
+            return self.action_out_proj(suffix_out[:, -self.action_horizon :])
+
+        def step(carry):
+            x_t, time = carry
+
+            def denoiser(x):
+                v_t = velocity(x, time)
+                return x - time * v_t, v_t
+
+            guided_velocity = rtc_guided_velocity(
+                denoiser,
+                x_t,
+                old_actions,
+                weights,
+                time,
+                max_guidance_weight,
+            )
+            return x_t + dt * guided_velocity, time + dt
+
+        def cond(carry):
+            _, time = carry
             return time >= -dt / 2
 
         x_0, _ = jax.lax.while_loop(cond, step, (noise, 1.0))
