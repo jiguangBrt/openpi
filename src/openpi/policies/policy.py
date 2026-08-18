@@ -21,6 +21,10 @@ from openpi.shared import nnx_utils
 BasePolicy: TypeAlias = _base_policy.BasePolicy
 
 
+_MARVINPRO_RTC_EXECUTION_HORIZONS = {10: 6, 20: 10}
+_MARVINPRO_RTC_MAX_PREDICTED_DELAY = 4
+
+
 class RtcPolicyError(ValueError):
     pass
 
@@ -70,21 +74,28 @@ class Policy(BasePolicy):
                 nnx_utils.module_jit(model.sample_actions_rtc) if hasattr(model, "sample_actions_rtc") else None
             )
             self._rng = rng or jax.random.key(0)
+        action_horizon = getattr(model, "action_horizon", None)
+        rtc_execution_horizon = _MARVINPRO_RTC_EXECUTION_HORIZONS.get(action_horizon)
         self._rtc_supported = (
             not self._is_pytorch_model
             and getattr(self, "_sample_actions_rtc", None) is not None
-            and getattr(model, "action_horizon", None) == 10
+            and rtc_execution_horizon is not None
             and getattr(model, "action_dim", None) == 32
             and any(type(transform).__name__ == "MarvinProInputs" for transform in transforms)
         )
         if self._rtc_supported:
+            assert isinstance(action_horizon, int)
+            assert rtc_execution_horizon is not None
+            self._rtc_action_horizon = action_horizon
+            self._rtc_execution_horizon = rtc_execution_horizon
+            self._rtc_prefix_horizon = action_horizon - rtc_execution_horizon
             self._metadata["rtc"] = {
                 "protocol": "rtc_v1",
-                "action_horizon": 10,
+                "action_horizon": action_horizon,
                 "native_action_dim": 16,
                 "model_action_dim": 32,
-                "execution_horizon": 6,
-                "max_predicted_delay": 4,
+                "execution_horizon": rtc_execution_horizon,
+                "max_predicted_delay": _MARVINPRO_RTC_MAX_PREDICTED_DELAY,
                 "prefix_attention_schedule": "exp",
             }
 
@@ -136,10 +147,16 @@ class Policy(BasePolicy):
             raise RtcPolicyError("rtc_v1 schedule must be 'exp'")
         predicted_delay = request.get("d_pred")
         execution_horizon = request.get("s")
-        if not isinstance(predicted_delay, int) or not 1 <= predicted_delay <= 4:
-            raise RtcPolicyError("rtc_v1 d_pred must be an integer in 1..4")
-        if execution_horizon != 6:
-            raise RtcPolicyError("rtc_v1 s must be 6")
+        if (
+            not isinstance(predicted_delay, int)
+            or not 1 <= predicted_delay <= _MARVINPRO_RTC_MAX_PREDICTED_DELAY
+        ):
+            raise RtcPolicyError(
+                "rtc_v1 d_pred must be an integer in "
+                f"1..{_MARVINPRO_RTC_MAX_PREDICTED_DELAY}"
+            )
+        if execution_horizon != self._rtc_execution_horizon:
+            raise RtcPolicyError(f"rtc_v1 s must be {self._rtc_execution_horizon}")
         max_guidance_weight = request.get("beta", 5.0)
         if not isinstance(max_guidance_weight, int | float) or not 0 < max_guidance_weight <= 10:
             raise RtcPolicyError("rtc_v1 beta must be in (0, 10]")
@@ -147,14 +164,19 @@ class Policy(BasePolicy):
         if not isinstance(observation_input, dict):
             raise RtcPolicyError("RTC observation must be a dictionary")
         old_remaining = np.asarray(request.get("old_remaining_actions_absolute"), dtype=np.float32)
-        if old_remaining.shape != (4, 16) or not np.isfinite(old_remaining).all():
+        expected_old_shape = (self._rtc_prefix_horizon, 16)
+        if old_remaining.shape != expected_old_shape or not np.isfinite(old_remaining).all():
             raise RtcPolicyError(
-                f"old_remaining_actions_absolute must have finite shape (4, 16), got {old_remaining.shape}"
+                "old_remaining_actions_absolute must have finite shape "
+                f"{expected_old_shape}, got {old_remaining.shape}"
             )
 
         rtc_started = preprocess_started = time.monotonic()
         padded_prefix = np.concatenate(
-            [old_remaining, np.repeat(old_remaining[-1:, :], repeats=6, axis=0)],
+            [
+                old_remaining,
+                np.repeat(old_remaining[-1:, :], repeats=self._rtc_execution_horizon, axis=0),
+            ],
             axis=0,
         )
         inputs = jax.tree.map(lambda x: x, observation_input)
@@ -165,8 +187,11 @@ class Policy(BasePolicy):
         except KeyError as exc:
             raise RtcPolicyError("policy input transforms removed the RTC action prefix") from exc
         old_actions = np.asarray(old_actions)
-        if old_actions.shape != (10, 32) or not np.isfinite(old_actions).all():
-            raise RtcPolicyError(f"transformed RTC prefix must have shape (10, 32), got {old_actions.shape}")
+        expected_model_shape = (self._rtc_action_horizon, 32)
+        if old_actions.shape != expected_model_shape or not np.isfinite(old_actions).all():
+            raise RtcPolicyError(
+                f"transformed RTC prefix must have shape {expected_model_shape}, got {old_actions.shape}"
+            )
         inputs = jax.tree.map(lambda x: jnp.asarray(x)[np.newaxis, ...], inputs)
         old_actions_device = jnp.asarray(old_actions)[np.newaxis, ...]
         observation = _model.Observation.from_dict(inputs)
@@ -194,8 +219,11 @@ class Policy(BasePolicy):
         outputs = self._output_transform(outputs)
         postprocess_ms = (time.monotonic() - postprocess_started) * 1000.0
         actions = np.asarray(outputs.get("actions"))
-        if actions.shape != (10, 16) or not np.isfinite(actions).all():
-            raise RtcPolicyError(f"postprocessed RTC actions must have finite shape (10, 16), got {actions.shape}")
+        expected_output_shape = (self._rtc_action_horizon, 16)
+        if actions.shape != expected_output_shape or not np.isfinite(actions).all():
+            raise RtcPolicyError(
+                f"postprocessed RTC actions must have finite shape {expected_output_shape}, got {actions.shape}"
+            )
         outputs["actions"] = actions
         outputs["policy_timing"] = {"infer_ms": denoise_ms}
         outputs["rtc_timing"] = {

@@ -59,6 +59,15 @@ def test_rtc_exponential_prefix_weights():
     )
 
 
+def test_h20_rtc_prefix_has_eight_soft_transition_actions_after_d2():
+    weights = np.asarray(get_rtc_prefix_weights(2, 10, 20))
+
+    np.testing.assert_allclose(weights[:2], np.ones(2), atol=1e-6)
+    assert np.all(np.diff(weights[2:10]) < 0)
+    assert np.all((weights[2:10] > 0) & (weights[2:10] < 1))
+    np.testing.assert_allclose(weights[10:], np.zeros(10), atol=1e-6)
+
+
 def test_reverse_time_rtc_guidance_moves_toward_prefix():
     x_t = jnp.zeros((1, 2, 1))
     old_actions = jnp.ones_like(x_t)
