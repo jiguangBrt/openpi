@@ -13,8 +13,10 @@ from openpi.training import config as _config
 
 
 class _FakeRtcModel:
-    action_horizon = 10
     action_dim = 32
+
+    def __init__(self, action_horizon):
+        self.action_horizon = action_horizon
 
     def sample_actions(self, rng, observation, **kwargs):
         del rng, observation, kwargs
@@ -25,7 +27,11 @@ class _FakeRtcModel:
         return old_actions
 
 
-def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
+@pytest.mark.parametrize(
+    ("action_horizon", "execution_horizon"),
+    [(10, 6), (20, 10)],
+)
+def test_marvinpro_rtc_prefix_round_trip(monkeypatch, action_horizon, execution_horizon):
     monkeypatch.setattr(_policy.nnx_utils, "module_jit", lambda function: function)
     stats = {
         "state": _normalize.NormStats(mean=np.linspace(-0.2, 0.2, 16), std=np.linspace(0.5, 1.5, 16)),
@@ -33,7 +39,7 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
     }
     delta_mask = transforms.make_bool_mask(7, -1, 7, -1)
     policy = _policy.Policy(
-        _FakeRtcModel(),
+        _FakeRtcModel(action_horizon),
         transforms=[
             marvinpro_policy.MarvinProInputs(),
             transforms.DeltaActions(delta_mask),
@@ -47,11 +53,14 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
         ],
     )
     state = np.linspace(-0.7, 0.7, 16, dtype=np.float32)
-    old_prefix = np.stack([state + index * 0.01 for index in range(4)]).astype(np.float32)
+    prefix_horizon = action_horizon - execution_horizon
+    old_prefix = np.stack([state + index * 0.01 for index in range(prefix_horizon)]).astype(
+        np.float32
+    )
     request = {
         "schedule": "exp",
         "d_pred": 2,
-        "s": 6,
+        "s": execution_horizon,
         "beta": 5.0,
         "observation": {
             "state": state,
@@ -66,11 +75,15 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
 
     result = policy.infer_rtc(request)
 
-    expected = np.concatenate([old_prefix, np.repeat(old_prefix[-1:], 6, axis=0)])
-    assert result["actions"].shape == (10, 16)
+    expected = np.concatenate(
+        [old_prefix, np.repeat(old_prefix[-1:], execution_horizon, axis=0)]
+    )
+    assert result["actions"].shape == (action_horizon, 16)
     np.testing.assert_allclose(result["actions"], expected, atol=1e-5)
     assert policy.metadata["rtc"]["protocol"] == "rtc_v1"
-    assert policy.metadata["rtc"]["execution_horizon"] == 6
+    assert policy.metadata["rtc"]["action_horizon"] == action_horizon
+    assert policy.metadata["rtc"]["execution_horizon"] == execution_horizon
+    assert policy.metadata["rtc"]["max_predicted_delay"] == 4
     assert set(result["rtc_timing"]) == {
         "preprocess_ms",
         "denoise_ms",
@@ -80,9 +93,14 @@ def test_marvinpro_rtc_prefix_round_trip(monkeypatch):
 
     invalid_requests = (
         {**request, "d_pred": 5},
-        {**request, "s": 3},
+        {**request, "s": execution_horizon - 1},
         {**request, "schedule": "linear"},
-        {**request, "old_remaining_actions_absolute": np.zeros((5, 16), dtype=np.float32)},
+        {
+            **request,
+            "old_remaining_actions_absolute": np.zeros(
+                (prefix_horizon + 1, 16), dtype=np.float32
+            ),
+        },
     )
     for invalid_request in invalid_requests:
         with pytest.raises(_policy.RtcPolicyError):
