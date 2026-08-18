@@ -927,6 +927,48 @@ _CONFIGS = [
         keep_period=5_000,
     ),
     TrainConfig(
+        name="pi05_marvinpro_red_cones_h20",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=20,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotMarvinProDataConfig(
+            repo_id="stack_red_cones",
+            base_config=DataConfig(
+                repo_root=str(
+                    pathlib.Path(__file__).resolve().parents[4] / "lerobot_data" / "stack_red_cones"
+                ),
+                episodes=tuple(range(103)),
+                prompt_from_task=True,
+            ),
+            use_delta_joint_actions=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=20,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=4_000,
+            peak_lr=2.5e-5,
+            decay_steps=40_000,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=80_000,
+        batch_size=1,
+        fsdp_devices=1,
+        save_interval=10_000,
+        keep_period=10_000,
+    ),
+    TrainConfig(
         name="pi05_ur_ping_pong",
         model=pi0_config.Pi0Config(
             pi05=True,
