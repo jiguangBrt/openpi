@@ -1,8 +1,10 @@
 import logging
+import threading
 import time
 from typing import Dict, Optional, Tuple
 
 from typing_extensions import override
+from websockets.exceptions import ConnectionClosed
 import websockets.sync.client
 
 from openpi_client import base_policy as _base_policy
@@ -15,7 +17,14 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
     See WebsocketPolicyServer for a corresponding server implementation.
     """
 
-    def __init__(self, host: str = "0.0.0.0", port: Optional[int] = None, api_key: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        host: str = "0.0.0.0",
+        port: Optional[int] = None,
+        api_key: Optional[str] = None,
+        connect_timeout_s: Optional[float] = None,
+        request_timeout_s: Optional[float] = None,
+    ) -> None:
         if host.startswith("ws"):
             self._uri = host
         else:
@@ -24,34 +33,97 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
             self._uri += f":{port}"
         self._packer = msgpack_numpy.Packer()
         self._api_key = api_key
-        self._ws, self._server_metadata = self._wait_for_server()
+        if connect_timeout_s is not None and connect_timeout_s <= 0:
+            raise ValueError("connect_timeout_s must be positive")
+        if request_timeout_s is not None and request_timeout_s <= 0:
+            raise ValueError("request_timeout_s must be positive")
+        self._connect_timeout_s = connect_timeout_s
+        self._request_timeout_s = request_timeout_s
+        self._connection_lock = threading.Lock()
+        self._ws = None
+        self._server_metadata = {}
+        self.reconnect()
 
     def get_server_metadata(self) -> Dict:
-        return self._server_metadata
+        with self._connection_lock:
+            return self._server_metadata
 
     def _wait_for_server(self) -> Tuple[websockets.sync.client.ClientConnection, Dict]:
         logging.info(f"Waiting for server at {self._uri}...")
+        deadline = None
+        if self._connect_timeout_s is not None:
+            deadline = time.monotonic() + self._connect_timeout_s
         while True:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise TimeoutError(f"Timed out connecting to policy server at {self._uri}")
+            conn = None
             try:
                 headers = {"Authorization": f"Api-Key {self._api_key}"} if self._api_key else None
                 conn = websockets.sync.client.connect(
-                    self._uri, compression=None, max_size=None, additional_headers=headers
+                    self._uri,
+                    compression=None,
+                    max_size=None,
+                    additional_headers=headers,
+                    open_timeout=remaining,
                 )
-                metadata = msgpack_numpy.unpackb(conn.recv())
+                metadata = msgpack_numpy.unpackb(conn.recv(timeout=remaining))
                 return conn, metadata
-            except ConnectionRefusedError:
+            except (ConnectionRefusedError, ConnectionClosed, OSError, TimeoutError) as exc:
+                if conn is not None:
+                    conn.close()
+                if deadline is not None:
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        raise TimeoutError(f"Timed out connecting to policy server at {self._uri}") from exc
                 logging.info("Still waiting for server...")
-                time.sleep(5)
+                time.sleep(5 if remaining is None else min(5, remaining))
+
+    def _close_connection(self, conn) -> None:
+        with self._connection_lock:
+            if self._ws is conn:
+                self._ws = None
+        conn.close()
+
+    def close(self) -> None:
+        """Close the active connection, including a recv blocked in another thread."""
+        with self._connection_lock:
+            conn = self._ws
+            self._ws = None
+        if conn is not None:
+            conn.close()
+
+    def reconnect(self) -> Dict:
+        """Replace the active connection and return metadata from the new server session."""
+        self.close()
+        conn, metadata = self._wait_for_server()
+        with self._connection_lock:
+            self._ws = conn
+            self._server_metadata = metadata
+        return metadata
 
     @override
     def infer(self, obs: Dict) -> Dict:  # noqa: UP006
+        with self._connection_lock:
+            conn = self._ws
+        if conn is None:
+            raise RuntimeError("Policy connection is closed")
         started = time.monotonic()
         serialization_started = started
         data = self._packer.pack(obs)
         request_serialization_ms = (time.monotonic() - serialization_started) * 1000.0
         transport_started = time.monotonic()
-        self._ws.send(data)
-        response = self._ws.recv()
+        try:
+            conn.send(data)
+            response = conn.recv(timeout=self._request_timeout_s)
+        except TimeoutError as exc:
+            self._close_connection(conn)
+            timeout = self._request_timeout_s
+            detail = "" if timeout is None else f" after {timeout:.3f}s"
+            raise TimeoutError(f"Policy request timed out{detail}") from exc
+        except ConnectionClosed as exc:
+            self._close_connection(conn)
+            raise ConnectionError("Policy connection closed during inference") from exc
         transport_round_trip_ms = (time.monotonic() - transport_started) * 1000.0
         if isinstance(response, str):
             # we're expecting bytes; if the server sends a string, it's an error.
