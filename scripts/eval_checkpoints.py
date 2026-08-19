@@ -38,6 +38,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--seed", type=int, default=20260805)
     parser.add_argument("--sample-steps", type=int, default=10)
+    parser.add_argument(
+        "--metric-horizon",
+        type=int,
+        help="Number of leading action steps used for deployment-prefix metrics; defaults to the model horizon.",
+    )
     parser.add_argument("--max-batches", type=int)
     parser.add_argument("--output-dir", type=pathlib.Path, required=True)
     return parser.parse_args()
@@ -81,6 +86,15 @@ def _device_put_batch(batch, data_sharding: jax.sharding.Sharding):
     return _model.Observation.from_dict(batch), batch["actions"]
 
 
+def _resolve_metric_horizon(action_horizon: int, requested_horizon: int | None) -> int:
+    metric_horizon = action_horizon if requested_horizon is None else requested_horizon
+    if not 1 <= metric_horizon <= action_horizon:
+        raise ValueError(
+            f"metric horizon must be in 1..{action_horizon}, got {metric_horizon}"
+        )
+    return metric_horizon
+
+
 def _metric_names() -> tuple[str, ...]:
     return (
         "flow_loss_sum",
@@ -94,6 +108,15 @@ def _metric_names() -> tuple[str, ...]:
         "gripper_abs_sum",
         "gripper_sq_sum",
         "gripper_count",
+        "prefix_norm_abs_sum",
+        "prefix_norm_sq_sum",
+        "prefix_norm_count",
+        "prefix_joint_abs_sum",
+        "prefix_joint_sq_sum",
+        "prefix_joint_count",
+        "prefix_gripper_abs_sum",
+        "prefix_gripper_sq_sum",
+        "prefix_gripper_count",
         "first_joint_abs_sum",
         "first_joint_sq_sum",
         "first_joint_count",
@@ -112,6 +135,18 @@ def _finalize_metrics(sums: dict[str, float]) -> dict[str, float]:
         "joint_chunk_rmse_rad": math.sqrt(sums["joint_sq_sum"] / sums["joint_count"]),
         "gripper_chunk_mae": sums["gripper_abs_sum"] / sums["gripper_count"],
         "gripper_chunk_rmse": math.sqrt(sums["gripper_sq_sum"] / sums["gripper_count"]),
+        "action_prefix_norm_mae": sums["prefix_norm_abs_sum"] / sums["prefix_norm_count"],
+        "action_prefix_norm_rmse": math.sqrt(
+            sums["prefix_norm_sq_sum"] / sums["prefix_norm_count"]
+        ),
+        "joint_prefix_mae_rad": sums["prefix_joint_abs_sum"] / sums["prefix_joint_count"],
+        "joint_prefix_rmse_rad": math.sqrt(
+            sums["prefix_joint_sq_sum"] / sums["prefix_joint_count"]
+        ),
+        "gripper_prefix_mae": sums["prefix_gripper_abs_sum"] / sums["prefix_gripper_count"],
+        "gripper_prefix_rmse": math.sqrt(
+            sums["prefix_gripper_sq_sum"] / sums["prefix_gripper_count"]
+        ),
         "joint_first_mae_rad": sums["first_joint_abs_sum"] / sums["first_joint_count"],
         "joint_first_rmse_rad": math.sqrt(sums["first_joint_sq_sum"] / sums["first_joint_count"]),
         "gripper_first_mae": sums["first_gripper_abs_sum"] / sums["first_gripper_count"],
@@ -139,6 +174,8 @@ def main() -> None:
         raise ValueError(f"Batch size {args.batch_size} must be divisible by {jax.device_count()} devices")
 
     config = _make_test_config(args)
+    action_horizon = int(config.model.action_horizon)
+    metric_horizon = _resolve_metric_horizon(action_horizon, args.metric_horizon)
     data_config, dataset_size, host_batches = _make_batches(config, args.max_batches)
     evaluated_samples = sum(next(iter(batch.values())).shape[0] for batch in host_batches)
     logging.info(
@@ -190,6 +227,9 @@ def main() -> None:
         physical_diff = predicted_physical - target_physical
         joint_diff = physical_diff[..., joint_indices]
         gripper_diff = physical_diff[..., gripper_indices]
+        prefix_norm_diff = norm_diff[:, :metric_horizon]
+        prefix_joint_diff = joint_diff[:, :metric_horizon]
+        prefix_gripper_diff = gripper_diff[:, :metric_horizon]
         first_joint_diff = joint_diff[:, 0]
         first_gripper_diff = gripper_diff[:, 0]
 
@@ -206,6 +246,15 @@ def main() -> None:
                 jnp.sum(jnp.abs(gripper_diff)),
                 jnp.sum(jnp.square(gripper_diff)),
                 gripper_diff.size,
+                jnp.sum(jnp.abs(prefix_norm_diff)),
+                jnp.sum(jnp.square(prefix_norm_diff)),
+                prefix_norm_diff.size,
+                jnp.sum(jnp.abs(prefix_joint_diff)),
+                jnp.sum(jnp.square(prefix_joint_diff)),
+                prefix_joint_diff.size,
+                jnp.sum(jnp.abs(prefix_gripper_diff)),
+                jnp.sum(jnp.square(prefix_gripper_diff)),
+                prefix_gripper_diff.size,
                 jnp.sum(jnp.abs(first_joint_diff)),
                 jnp.sum(jnp.square(first_joint_diff)),
                 first_joint_diff.size,
@@ -226,6 +275,8 @@ def main() -> None:
         "batch_size": args.batch_size,
         "seed": args.seed,
         "sample_steps": args.sample_steps,
+        "model_action_horizon": action_horizon,
+        "metric_horizon": metric_horizon,
         "devices": [str(device) for device in jax.devices()],
     }
     results = []
