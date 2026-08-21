@@ -911,8 +911,11 @@ _CONFIGS = [
         ),
         data=LeRobotMarvinProDataConfig(
             repo_id="marvinpro_raw_data_trans",
+            assets=AssetsConfig(
+                assets_dir=str(pathlib.Path(__file__).resolve().parents[4] / "assets" / "pi05_marvinpro")
+            ),
             base_config=DataConfig(
-                repo_root="/home/jh/TianJi_data_collector/MarvinPro_raw_data_trans/lerobot_dataset",
+                repo_root=str(_local_dataset_root("marvinpro_raw_data_trans")),
                 prompt_from_task=True,
             ),
             use_delta_joint_actions=True,
@@ -949,7 +952,9 @@ _CONFIGS = [
         ),
         data=LeRobotMarvinProDataConfig(
             repo_id="stack_red_cones",
-            assets=AssetsConfig(assets_dir=str(_local_dataset_root("stack_red_cones").parent)),
+            assets=AssetsConfig(
+                assets_dir=str(pathlib.Path(__file__).resolve().parents[4] / "assets" / "pi05_marvinpro_red_cones")
+            ),
             base_config=DataConfig(
                 repo_root=str(_local_dataset_root("stack_red_cones")),
                 episodes=tuple(range(103)),
@@ -990,7 +995,9 @@ _CONFIGS = [
         ),
         data=LeRobotMarvinProDataConfig(
             repo_id="stack_red_cones",
-            assets=AssetsConfig(assets_dir=str(_local_dataset_root("stack_red_cones").parent)),
+            assets=AssetsConfig(
+                assets_dir=str(pathlib.Path(__file__).resolve().parents[4] / "assets" / "pi05_marvinpro_red_cones_h20")
+            ),
             base_config=DataConfig(
                 repo_root=str(_local_dataset_root("stack_red_cones")),
                 episodes=tuple(range(103)),

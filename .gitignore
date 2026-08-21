@@ -1,6 +1,7 @@
 # Data directories.
 assets/
 checkpoints/
+policy_records
 data/
 wandb/
 

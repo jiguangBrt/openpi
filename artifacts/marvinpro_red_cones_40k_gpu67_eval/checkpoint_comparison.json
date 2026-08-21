@@ -1,0 +1,242 @@
+{
+  "evaluation": {
+    "batch_size": 4,
+    "checkpoint_root": "/mnt/reacher-fast/openpi_ur_pp_202607/repo/checkpoints/pi05_marvinpro_red_cones/marvinpro_red_cones_40k_gpu67",
+    "config": "pi05_marvinpro_red_cones",
+    "dataset_frames": 4036,
+    "devices": [
+      "cuda:0",
+      "cuda:1"
+    ],
+    "evaluated_frames": 4036,
+    "evaluation_segments": [
+      {
+        "cuda_visible_devices": [
+          5,
+          6
+        ],
+        "gpu_uuids": [
+          "GPU-c0793ef6-6642-bc3d-22e8-6ec2f6ae2667",
+          "GPU-700eff71-4ab2-6491-7148-0c931deb6430"
+        ],
+        "steps": [
+          5000,
+          10000,
+          15000,
+          20000,
+          25000
+        ]
+      },
+      {
+        "cuda_visible_devices": [
+          4,
+          5
+        ],
+        "gpu_uuids": [
+          "GPU-c0793ef6-6642-bc3d-22e8-6ec2f6ae2667",
+          "GPU-700eff71-4ab2-6491-7148-0c931deb6430"
+        ],
+        "steps": [
+          30000,
+          35000,
+          39999
+        ]
+      }
+    ],
+    "sample_steps": 10,
+    "seed": 20260805,
+    "steps": [
+      5000,
+      10000,
+      15000,
+      20000,
+      25000,
+      30000,
+      35000,
+      39999
+    ],
+    "test_episodes": [
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114
+    ]
+  },
+  "results": [
+    {
+      "action_norm_mae": 0.13861840523712934,
+      "action_norm_rmse": 0.28704121765089224,
+      "checkpoint_step": 5000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 279.83284544699995,
+      "gripper_chunk_mae": 0.050328174463082825,
+      "gripper_chunk_rmse": 0.14273529410744046,
+      "gripper_first_mae": 0.028745049313984524,
+      "gripper_first_rmse": 0.07578056177308715,
+      "joint_chunk_mae_rad": 0.024837107261246973,
+      "joint_chunk_rmse_rad": 0.05157951483484909,
+      "joint_first_mae_rad": 0.008175895065037552,
+      "joint_first_rmse_rad": 0.01430501758762624,
+      "test_flow_loss": 0.04538284325021494,
+      "wandb_grad_norm": 0.4476093054,
+      "wandb_metric_step": 5000,
+      "wandb_param_norm": 1804.009277,
+      "wandb_train_loss": 0.0422395989
+    },
+    {
+      "action_norm_mae": 0.1228397024738186,
+      "action_norm_rmse": 0.25987937057833543,
+      "checkpoint_step": 10000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 275.1036093550001,
+      "gripper_chunk_mae": 0.03543984750941086,
+      "gripper_chunk_rmse": 0.11481407287489379,
+      "gripper_first_mae": 0.01751852778503736,
+      "gripper_first_rmse": 0.04653320436275458,
+      "joint_chunk_mae_rad": 0.022211347722676394,
+      "joint_chunk_rmse_rad": 0.046383981101828134,
+      "joint_first_mae_rad": 0.007311159750528694,
+      "joint_first_rmse_rad": 0.013233145026285035,
+      "test_flow_loss": 0.03856862828788985,
+      "wandb_grad_norm": 0.3221997619,
+      "wandb_metric_step": 10000,
+      "wandb_param_norm": 1804.290894,
+      "wandb_train_loss": 0.0268679224
+    },
+    {
+      "action_norm_mae": 0.1195108908092893,
+      "action_norm_rmse": 0.2557841608164405,
+      "checkpoint_step": 15000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 276.788920385,
+      "gripper_chunk_mae": 0.03390920088248931,
+      "gripper_chunk_rmse": 0.11841284810446062,
+      "gripper_first_mae": 0.014190484070227407,
+      "gripper_first_rmse": 0.03482439716632685,
+      "joint_chunk_mae_rad": 0.02150717277048702,
+      "joint_chunk_rmse_rad": 0.04500749911514828,
+      "joint_first_mae_rad": 0.00705183966186319,
+      "joint_first_rmse_rad": 0.012576895558690132,
+      "test_flow_loss": 0.03603411306580021,
+      "wandb_grad_norm": 0.3209120929,
+      "wandb_metric_step": 15000,
+      "wandb_param_norm": 1804.516235,
+      "wandb_train_loss": 0.0256820712
+    },
+    {
+      "action_norm_mae": 0.11091143565826539,
+      "action_norm_rmse": 0.2357617469328837,
+      "checkpoint_step": 20000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 276.630149222,
+      "gripper_chunk_mae": 0.030643493320508624,
+      "gripper_chunk_rmse": 0.10935125977031764,
+      "gripper_first_mae": 0.012401220405786284,
+      "gripper_first_rmse": 0.03183225133495609,
+      "joint_chunk_mae_rad": 0.019834445552584234,
+      "joint_chunk_rmse_rad": 0.04050078116690095,
+      "joint_first_mae_rad": 0.006571154990426655,
+      "joint_first_rmse_rad": 0.01164345470506601,
+      "test_flow_loss": 0.03640619012987752,
+      "wandb_grad_norm": 0.3193037212,
+      "wandb_metric_step": 20000,
+      "wandb_param_norm": 1804.67334,
+      "wandb_train_loss": 0.0218417067
+    },
+    {
+      "action_norm_mae": 0.10449633048136596,
+      "action_norm_rmse": 0.2259297096521564,
+      "checkpoint_step": 25000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 276.504831103,
+      "gripper_chunk_mae": 0.027028319845299124,
+      "gripper_chunk_rmse": 0.10321262160060508,
+      "gripper_first_mae": 0.011165107487090766,
+      "gripper_first_rmse": 0.026875534066187538,
+      "joint_chunk_mae_rad": 0.018666835000777267,
+      "joint_chunk_rmse_rad": 0.03853177251597654,
+      "joint_first_mae_rad": 0.006157241791748349,
+      "joint_first_rmse_rad": 0.011056222571842354,
+      "test_flow_loss": 0.03463459089822971,
+      "wandb_grad_norm": 0.3133478463,
+      "wandb_metric_step": 25000,
+      "wandb_param_norm": 1804.765625,
+      "wandb_train_loss": 0.0199461244
+    },
+    {
+      "action_norm_mae": 0.10402796234496167,
+      "action_norm_rmse": 0.22246510096383296,
+      "checkpoint_step": 30000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 283.2637629789997,
+      "gripper_chunk_mae": 0.026816895917405045,
+      "gripper_chunk_rmse": 0.10064667087022977,
+      "gripper_first_mae": 0.011003281743929337,
+      "gripper_first_rmse": 0.021241208398464412,
+      "joint_chunk_mae_rad": 0.0187172596612514,
+      "joint_chunk_rmse_rad": 0.038331700559451426,
+      "joint_first_mae_rad": 0.006157140460081053,
+      "joint_first_rmse_rad": 0.01084826738753933,
+      "test_flow_loss": 0.035244397176115806,
+      "wandb_grad_norm": 0.292876631,
+      "wandb_metric_step": 30000,
+      "wandb_param_norm": 1804.810303,
+      "wandb_train_loss": 0.0159128048
+    },
+    {
+      "action_norm_mae": 0.09976197653796202,
+      "action_norm_rmse": 0.21538633045769845,
+      "checkpoint_step": 35000,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 277.993542573,
+      "gripper_chunk_mae": 0.02228355978138383,
+      "gripper_chunk_rmse": 0.09050055636171143,
+      "gripper_first_mae": 0.00839063969574134,
+      "gripper_first_rmse": 0.020018029899087804,
+      "joint_chunk_mae_rad": 0.018049432588766238,
+      "joint_chunk_rmse_rad": 0.037284224354236346,
+      "joint_first_mae_rad": 0.005963137491737903,
+      "joint_first_rmse_rad": 0.010653096396646224,
+      "test_flow_loss": 0.03665236641114764,
+      "wandb_grad_norm": 0.2935161889,
+      "wandb_metric_step": 35000,
+      "wandb_param_norm": 1804.828125,
+      "wandb_train_loss": 0.0148990154
+    },
+    {
+      "action_norm_mae": 0.09686356707004419,
+      "action_norm_rmse": 0.2096610029142031,
+      "checkpoint_step": 39999,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 278.67436979800004,
+      "gripper_chunk_mae": 0.021997439336655635,
+      "gripper_chunk_rmse": 0.09093266597895555,
+      "gripper_first_mae": 0.008457881256470012,
+      "gripper_first_rmse": 0.01971651302659875,
+      "joint_chunk_mae_rad": 0.017566766385128794,
+      "joint_chunk_rmse_rad": 0.036324707706914865,
+      "joint_first_mae_rad": 0.00583330299241122,
+      "joint_first_rmse_rad": 0.010445710163181965,
+      "test_flow_loss": 0.03774014336589587,
+      "wandb_grad_norm": 0.2686185539,
+      "wandb_metric_step": 39900,
+      "wandb_param_norm": 1804.835938,
+      "wandb_train_loss": 0.012206113
+    }
+  ],
+  "wandb": {
+    "entity": "peter_huang",
+    "final_checkpoint_note": "Checkpoint 39999 uses the last available W&B metric at step 39900.",
+    "project": "openpi",
+    "run_id": "rmj95mhq",
+    "run_url": "https://wandb.ai/peter_huang/openpi/runs/rmj95mhq"
+  }
+}
