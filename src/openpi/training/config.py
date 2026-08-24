@@ -89,6 +89,12 @@ class DataConfig:
     norm_stats: dict[str, _transforms.NormStats] | None = None
     # Optional episode subset, used to isolate train/test splits in local datasets.
     episodes: Sequence[int] | None = None
+    # Optional frame-level RECAP labels, keyed by episode_index and frame_index.
+    recap_sidecar_path: str | None = None
+    # Optional 201-bin return targets for the standalone RECAP value trainer.
+    recap_value_targets_path: str | None = None
+    # Preserve episode/frame keys through transforms for value prediction export.
+    recap_include_frame_keys: bool = False
 
     # Used to adopt the inputs from a dataset specific format to a common format
     # which is expected by the data transforms.
@@ -145,14 +151,22 @@ class ModelTransformFactory(GroupFactory):
                 )
             case _model.ModelType.PI05:
                 assert isinstance(model_config, pi0_config.Pi0Config)
+                tokenize_transform = (
+                    _transforms.TokenizeReCAPPrompt(
+                        _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
+                        discrete_state_input=model_config.discrete_state_input,
+                    )
+                    if model_config.recap_enabled
+                    else _transforms.TokenizePrompt(
+                        _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
+                        discrete_state_input=model_config.discrete_state_input,
+                    )
+                )
                 return _transforms.Group(
                     inputs=[
                         _transforms.InjectDefaultPrompt(self.default_prompt),
                         _transforms.ResizeImages(224, 224),
-                        _transforms.TokenizePrompt(
-                            _tokenizer.PaligemmaTokenizer(model_config.max_token_len),
-                            discrete_state_input=model_config.discrete_state_input,
-                        ),
+                        tokenize_transform,
                         _transforms.PadStatesAndActions(model_config.action_dim),
                     ],
                 )
@@ -349,22 +363,28 @@ class LeRobotMarvinProDataConfig(DataConfigFactory):
 
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig) -> DataConfig:
-        repack_transform = _transforms.Group(
-            inputs=[
-                _transforms.RepackTransform(
-                    {
-                        "images": {
-                            "cam_high": "observation.images.cam_high",
-                            "cam_left_wrist": "observation.images.cam_left_wrist",
-                            "cam_right_wrist": "observation.images.cam_right_wrist",
-                        },
-                        "state": "observation.state",
-                        "actions": "action",
-                        "prompt": "prompt",
-                    }
-                )
-            ]
-        )
+        recap_enabled = isinstance(model_config, pi0_config.Pi0Config) and model_config.recap_enabled
+        base_config = self.create_base_config(assets_dirs, model_config)
+        repack_structure = {
+            "images": {
+                "cam_high": "observation.images.cam_high",
+                "cam_left_wrist": "observation.images.cam_left_wrist",
+                "cam_right_wrist": "observation.images.cam_right_wrist",
+            },
+            "state": "observation.state",
+            "actions": "action",
+            "prompt": "prompt",
+        }
+        if recap_enabled:
+            repack_structure["advantage_indicator"] = "advantage_indicator"
+        if base_config.recap_value_targets_path is not None:
+            repack_structure["value_target_bin"] = "value_target_bin"
+        if base_config.recap_include_frame_keys:
+            repack_structure["episode_index"] = "episode_index"
+            repack_structure["frame_index"] = "frame_index"
+        repack_transform = _transforms.Group(inputs=[_transforms.RepackTransform(repack_structure)])
+        if recap_enabled and base_config.recap_sidecar_path is None:
+            raise ValueError("RECAP Marvin Pro training requires DataConfig.recap_sidecar_path")
         data_transforms = _transforms.Group(
             inputs=[marvinpro_policy.MarvinProInputs()],
             outputs=[marvinpro_policy.MarvinProOutputs()],
@@ -377,7 +397,7 @@ class LeRobotMarvinProDataConfig(DataConfigFactory):
             )
 
         return dataclasses.replace(
-            self.create_base_config(assets_dirs, model_config),
+            base_config,
             repack_transforms=repack_transform,
             data_transforms=data_transforms,
             model_transforms=ModelTransformFactory()(model_config),
@@ -693,6 +713,36 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
+
+
+# RECAP paths are intentionally environment-overridable because Iteration 0 and
+# the aggregated rollout dataset live on different machines in this project.
+_RECAP_BASE_CHECKPOINT = pathlib.Path(
+    os.environ.get(
+        "OPENPI_RECAP_BASE_CHECKPOINT",
+        str(
+            pathlib.Path(__file__).resolve().parents[3]
+            / "checkpoints/pi05_marvinpro_red_cones_h20/"
+            "marvinpro_red_cones_h20_80k_gpu1/79999"
+        ),
+    )
+)
+_RECAP_DATASET_ROOT = pathlib.Path(
+    os.environ.get("OPENPI_RECAP_DATASET_ROOT", str(_local_dataset_root("stack_red_cones_recap")))
+)
+_RECAP_SIDECAR_PATH = os.environ.get(
+    "OPENPI_RECAP_SIDECAR_PATH", str(_RECAP_DATASET_ROOT / "meta" / "recap" / "advantages.npz")
+)
+_RECAP_POLICY_STEPS = int(os.environ.get("OPENPI_RECAP_POLICY_STEPS", "10000"))
+_RECAP_POLICY_MODEL = pi0_config.Pi0Config(
+    pi05=True,
+    action_horizon=20,
+    discrete_state_input=True,
+    paligemma_variant="gemma_2b_lora",
+    action_expert_variant="gemma_300m_lora",
+    recap_enabled=True,
+    recap_condition_dropout_prob=0.3,
+)
 
 
 # Use `get_config` if you need to get a config by name in your code.
@@ -1026,6 +1076,43 @@ _CONFIGS = [
         fsdp_devices=1,
         save_interval=10_000,
         keep_period=10_000,
+    ),
+    TrainConfig(
+        name="pi05_marvinpro_red_cones_h20_recap",
+        model=_RECAP_POLICY_MODEL,
+        data=LeRobotMarvinProDataConfig(
+            repo_id="stack_red_cones_recap",
+            assets=AssetsConfig(
+                assets_dir=str(_RECAP_BASE_CHECKPOINT / "assets"),
+                asset_id="stack_red_cones",
+            ),
+            base_config=DataConfig(
+                repo_root=str(_RECAP_DATASET_ROOT),
+                recap_sidecar_path=_RECAP_SIDECAR_PATH,
+                prompt_from_task=True,
+            ),
+            use_delta_joint_actions=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(str(_RECAP_BASE_CHECKPOINT / "params")),
+        freeze_filter=_RECAP_POLICY_MODEL.get_recap_policy_freeze_filter(),
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=max(1, round(_RECAP_POLICY_STEPS * 0.1)),
+            peak_lr=2.5e-5,
+            decay_steps=_RECAP_POLICY_STEPS,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=_RECAP_POLICY_STEPS,
+        batch_size=8,
+        fsdp_devices=1,
+        save_interval=max(1, _RECAP_POLICY_STEPS // 10),
+        keep_period=max(1, _RECAP_POLICY_STEPS // 2),
+        policy_metadata={
+            "model_name": "pi0.5-RECAP",
+            "recap_condition": "positive",
+            "recap_cfg_beta": 1.0,
+        },
     ),
     TrainConfig(
         name="pi05_ur_ping_pong",

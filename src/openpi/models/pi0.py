@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 
 import einops
@@ -14,6 +15,36 @@ import openpi.models.siglip as _siglip
 from openpi.shared import array_typing as at
 
 logger = logging.getLogger("openpi")
+
+
+def apply_recap_condition_dropout(
+    rng: at.KeyArrayLike,
+    observation: _model.Observation,
+    *,
+    dropout_prob: float,
+) -> _model.Observation:
+    """Select the conditioned prompt per sample, dropping it with the requested probability."""
+
+    conditioned = observation.tokenized_prompt_with_advantage
+    conditioned_mask = observation.tokenized_prompt_with_advantage_mask
+    if conditioned is None or conditioned_mask is None:
+        return observation
+    if observation.tokenized_prompt is None or observation.tokenized_prompt_mask is None:
+        raise ValueError("RECAP prompt dropout requires an unconditioned prompt")
+    if not 0.0 <= dropout_prob <= 1.0:
+        raise ValueError("dropout_prob must be in [0, 1]")
+
+    use_condition = jax.random.bernoulli(
+        rng,
+        p=1.0 - dropout_prob,
+        shape=observation.state.shape[:-1],
+    )
+    use_condition = use_condition[..., None]
+    return dataclasses.replace(
+        observation,
+        tokenized_prompt=jnp.where(use_condition, conditioned, observation.tokenized_prompt),
+        tokenized_prompt_mask=jnp.where(use_condition, conditioned_mask, observation.tokenized_prompt_mask),
+    )
 
 
 def get_rtc_prefix_weights(
@@ -103,6 +134,8 @@ class Pi0(_model.BaseModel):
     def __init__(self, config: pi0_config.Pi0Config, rngs: nnx.Rngs):
         super().__init__(config.action_dim, config.action_horizon, config.max_token_len)
         self.pi05 = config.pi05
+        self.recap_enabled = config.recap_enabled
+        self.recap_condition_dropout_prob = config.recap_condition_dropout_prob
         paligemma_config = _gemma.get_config(config.paligemma_variant)
         action_expert_config = _gemma.get_config(config.action_expert_variant)
         # TODO: rewrite gemma in NNX. For now, use bridge.
@@ -225,8 +258,14 @@ class Pi0(_model.BaseModel):
     def compute_loss(
         self, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions, *, train: bool = False
     ) -> at.Float[at.Array, "*b ah"]:
-        preprocess_rng, noise_rng, time_rng = jax.random.split(rng, 3)
+        preprocess_rng, condition_rng, noise_rng, time_rng = jax.random.split(rng, 4)
         observation = _model.preprocess_observation(preprocess_rng, observation, train=train)
+        if self.recap_enabled:
+            observation = apply_recap_condition_dropout(
+                condition_rng,
+                observation,
+                dropout_prob=self.recap_condition_dropout_prob if train else 0.0,
+            )
 
         batch_shape = actions.shape[:-2]
         noise = jax.random.normal(noise_rng, actions.shape)
@@ -351,9 +390,7 @@ class Pi0(_model.BaseModel):
             suffix_attn_mask = make_attn_mask(suffix_mask, suffix_ar_mask)
             prefix_to_suffix_mask = einops.repeat(prefix_mask, "b p -> b s p", s=suffix_tokens.shape[1])
             full_attn_mask = jnp.concatenate([prefix_to_suffix_mask, suffix_attn_mask], axis=-1)
-            suffix_positions = (
-                jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
-            )
+            suffix_positions = jnp.sum(prefix_mask, axis=-1)[:, None] + jnp.cumsum(suffix_mask, axis=-1) - 1
             (prefix_out, suffix_out), _ = self.PaliGemma.llm(
                 [None, suffix_tokens],
                 mask=full_attn_mask,

@@ -267,6 +267,48 @@ class TokenizePrompt(DataTransformFn):
 
 
 @dataclasses.dataclass(frozen=True)
+class TokenizeReCAPPrompt(DataTransformFn):
+    """Tokenize unconditioned and advantage-conditioned pi0.5 prompts.
+
+    A sidecar-provided ``advantage_indicator`` identifies training samples. If it
+    is absent, this is inference and the single primary prompt is always positive.
+    """
+
+    tokenizer: _tokenizer.PaligemmaTokenizer
+    discrete_state_input: bool = True
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if (prompt := data.pop("prompt", None)) is None:
+            raise ValueError("Prompt is required")
+        if self.discrete_state_input:
+            if (state := data.get("state")) is None:
+                raise ValueError("State is required.")
+        else:
+            state = None
+        if not isinstance(prompt, str):
+            prompt = prompt.item()
+
+        indicator = data.pop("advantage_indicator", None)
+        if indicator is None:
+            tokens, masks = self.tokenizer.tokenize(f"{prompt}\nAdvantage: positive", state)
+            return {**data, "tokenized_prompt": tokens, "tokenized_prompt_mask": masks}
+
+        indicator_array = np.asarray(indicator)
+        if indicator_array.ndim != 0 or indicator_array.item() not in (False, True, 0, 1):
+            raise ValueError("advantage_indicator must be a scalar boolean")
+        label = "positive" if bool(indicator_array) else "negative"
+        tokens, masks = self.tokenizer.tokenize(prompt, state)
+        conditioned_tokens, conditioned_masks = self.tokenizer.tokenize(f"{prompt}\nAdvantage: {label}", state)
+        return {
+            **data,
+            "tokenized_prompt": tokens,
+            "tokenized_prompt_mask": masks,
+            "tokenized_prompt_with_advantage": conditioned_tokens,
+            "tokenized_prompt_with_advantage_mask": conditioned_masks,
+        }
+
+
+@dataclasses.dataclass(frozen=True)
 class TokenizeFASTInputs(DataTransformFn):
     tokenizer: _tokenizer.FASTTokenizer
 

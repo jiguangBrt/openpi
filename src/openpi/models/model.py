@@ -99,6 +99,16 @@ class Observation(Generic[ArrayT]):
     # Tokenized prompt mask.
     tokenized_prompt_mask: at.Bool[ArrayT, "*b l"] | None = None
 
+    # RECAP training-only prompt containing ``Advantage: positive/negative``.
+    # At inference the positive-conditioned prompt is stored in tokenized_prompt directly.
+    tokenized_prompt_with_advantage: at.Int[ArrayT, "*b l"] | None = None
+    tokenized_prompt_with_advantage_mask: at.Bool[ArrayT, "*b l"] | None = None
+    # Distributional-value target used only by the standalone RECAP value trainer.
+    value_target_bin: at.Int[ArrayT, "*b"] | None = None
+    # Optional immutable dataset keys used while exporting value predictions.
+    episode_index: at.Int[ArrayT, "*b"] | None = None
+    frame_index: at.Int[ArrayT, "*b"] | None = None
+
     # pi0-fast model specific fields.
 
     # Token auto-regressive mask (for FAST autoregressive model).
@@ -112,6 +122,10 @@ class Observation(Generic[ArrayT]):
         # Ensure that tokenized_prompt and tokenized_prompt_mask are provided together.
         if ("tokenized_prompt" in data) != ("tokenized_prompt_mask" in data):
             raise ValueError("tokenized_prompt and tokenized_prompt_mask must be provided together.")
+        if ("tokenized_prompt_with_advantage" in data) != ("tokenized_prompt_with_advantage_mask" in data):
+            raise ValueError(
+                "tokenized_prompt_with_advantage and tokenized_prompt_with_advantage_mask must be provided together."
+            )
         # If images are uint8, convert them to [-1, 1] float32.
         for key in data["image"]:
             if data["image"][key].dtype == np.uint8:
@@ -124,6 +138,11 @@ class Observation(Generic[ArrayT]):
             state=data["state"],
             tokenized_prompt=data.get("tokenized_prompt"),
             tokenized_prompt_mask=data.get("tokenized_prompt_mask"),
+            tokenized_prompt_with_advantage=data.get("tokenized_prompt_with_advantage"),
+            tokenized_prompt_with_advantage_mask=data.get("tokenized_prompt_with_advantage_mask"),
+            value_target_bin=data.get("value_target_bin"),
+            episode_index=data.get("episode_index"),
+            frame_index=data.get("frame_index"),
             token_ar_mask=data.get("token_ar_mask"),
             token_loss_mask=data.get("token_loss_mask"),
         )
@@ -203,6 +222,11 @@ def preprocess_observation(
         state=observation.state,
         tokenized_prompt=observation.tokenized_prompt,
         tokenized_prompt_mask=observation.tokenized_prompt_mask,
+        tokenized_prompt_with_advantage=observation.tokenized_prompt_with_advantage,
+        tokenized_prompt_with_advantage_mask=observation.tokenized_prompt_with_advantage_mask,
+        value_target_bin=observation.value_target_bin,
+        episode_index=observation.episode_index,
+        frame_index=observation.frame_index,
         token_ar_mask=observation.token_ar_mask,
         token_loss_mask=observation.token_loss_mask,
     )

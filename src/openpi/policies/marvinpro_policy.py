@@ -72,6 +72,14 @@ class MarvinProInputs(transforms.DataTransformFn):
             inputs["actions"] = actions
         if "prompt" in data:
             inputs["prompt"] = data["prompt"]
+        if "advantage_indicator" in data:
+            inputs["advantage_indicator"] = data["advantage_indicator"]
+        if "value_target_bin" in data:
+            inputs["value_target_bin"] = data["value_target_bin"]
+        if "episode_index" in data:
+            inputs["episode_index"] = data["episode_index"]
+        if "frame_index" in data:
+            inputs["frame_index"] = data["frame_index"]
         return inputs
 
 

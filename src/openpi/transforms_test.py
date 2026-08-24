@@ -85,6 +85,30 @@ def test_tokenize_no_prompt():
         transform({})
 
 
+class _FakePromptTokenizer:
+    def tokenize(self, prompt, state=None):
+        value = 2 if "positive" in prompt else 3 if "negative" in prompt else 1
+        return np.asarray([value, value]), np.asarray([True, True])
+
+
+def test_tokenize_recap_prompt_training_and_inference():
+    transform = _transforms.TokenizeReCAPPrompt(_FakePromptTokenizer(), discrete_state_input=True)
+    training = transform(
+        {
+            "prompt": "stack the cones",
+            "state": np.zeros(2),
+            "advantage_indicator": np.asarray(0, dtype=np.bool_),
+        }
+    )
+    np.testing.assert_array_equal(training["tokenized_prompt"], [1, 1])
+    np.testing.assert_array_equal(training["tokenized_prompt_with_advantage"], [3, 3])
+    assert "advantage_indicator" not in training
+
+    inference = transform({"prompt": "stack the cones", "state": np.zeros(2)})
+    np.testing.assert_array_equal(inference["tokenized_prompt"], [2, 2])
+    assert "tokenized_prompt_with_advantage" not in inference
+
+
 def test_transform_dict():
     # Rename and remove keys.
     input = {"a": {"b": 1, "c": 2}}

@@ -32,6 +32,11 @@ class Pi0Config(_model.BaseModelConfig):
     # This config option is not used directly by the model, but it is read by the ModelTransformFactory.
     discrete_state_input: bool = None  # type: ignore
 
+    # Enable the public RECAP advantage-conditioning approximation. This remains
+    # off for all existing pi0/pi0.5 configurations.
+    recap_enabled: bool = False
+    recap_condition_dropout_prob: float = 0.3
+
     pytorch_compile_mode: str | None = "max-autotune"
 
     def __post_init__(self):
@@ -46,6 +51,10 @@ class Pi0Config(_model.BaseModelConfig):
                 "max-autotune",
                 "max-autotune-no-cudagraphs",
             ]
+        if not 0.0 <= self.recap_condition_dropout_prob <= 1.0:
+            raise ValueError("recap_condition_dropout_prob must be in [0, 1]")
+        if self.recap_enabled and not self.pi05:
+            raise ValueError("RECAP advantage conditioning is currently supported only for pi0.5")
 
     @property
     @override
@@ -80,6 +89,12 @@ class Pi0Config(_model.BaseModelConfig):
                 state=jax.ShapeDtypeStruct([batch_size, self.action_dim], jnp.float32),
                 tokenized_prompt=jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32),
                 tokenized_prompt_mask=jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool),
+                tokenized_prompt_with_advantage=(
+                    jax.ShapeDtypeStruct([batch_size, self.max_token_len], jnp.int32) if self.recap_enabled else None
+                ),
+                tokenized_prompt_with_advantage_mask=(
+                    jax.ShapeDtypeStruct([batch_size, self.max_token_len], bool) if self.recap_enabled else None
+                ),
             )
         action_spec = jax.ShapeDtypeStruct([batch_size, self.action_horizon, self.action_dim], jnp.float32)
 
@@ -115,3 +130,16 @@ class Pi0Config(_model.BaseModelConfig):
         if not filters:
             return nnx.Nothing
         return nnx.All(*filters)
+
+    def get_recap_policy_freeze_filter(self) -> nnx.filterlib.Filter:
+        """Freeze everything except action-expert LoRA and flow projection/MLP weights."""
+
+        if not self.recap_enabled:
+            raise ValueError("get_recap_policy_freeze_filter requires recap_enabled=True")
+        if "lora" not in self.action_expert_variant:
+            raise ValueError("RECAP policy training requires an action-expert LoRA variant")
+        trainable = nnx.Any(
+            nnx_utils.PathRegex(".*llm.*_1.*lora.*"),
+            nnx_utils.PathRegex(".*(action_in_proj|action_out_proj|time_mlp_in|time_mlp_out).*"),
+        )
+        return nnx.All(nnx.Param, nnx.Not(trainable))

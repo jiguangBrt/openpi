@@ -14,6 +14,7 @@ import torch
 import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
+import openpi.training.recap as _recap
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -57,6 +58,56 @@ class TransformedDataset(Dataset[T_co]):
 
     def __getitem__(self, index: SupportsIndex) -> T_co:
         return self._transform(self._dataset[index])
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+
+class ReCAPLabelsDataset(Dataset[T_co]):
+    """Attach strict frame-level advantage labels without modifying source data."""
+
+    def __init__(self, dataset: Dataset, sidecar_path: str):
+        self._dataset = dataset
+        self._sidecar = _recap.ReCAPSidecar(sidecar_path)
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        sample = self._dataset[index]
+        if "episode_index" not in sample or "frame_index" not in sample:
+            raise KeyError("RECAP datasets must expose episode_index and frame_index")
+        episode_index = int(np.asarray(sample["episode_index"]).item())
+        frame_index = int(np.asarray(sample["frame_index"]).item())
+        return {
+            **sample,
+            "advantage_indicator": np.asarray(
+                self._sidecar.indicator(episode_index, frame_index),
+                dtype=np.bool_,
+            ),
+        }
+
+    def __len__(self) -> int:
+        return len(self._dataset)
+
+
+class ReCAPValueTargetsDataset(Dataset[T_co]):
+    """Attach strict frame-level distributional return targets."""
+
+    def __init__(self, dataset: Dataset, sidecar_path: str):
+        self._dataset = dataset
+        self._targets = _recap.ReCAPValueTargets(sidecar_path)
+
+    def __getitem__(self, index: SupportsIndex) -> T_co:
+        sample = self._dataset[index]
+        if "episode_index" not in sample or "frame_index" not in sample:
+            raise KeyError("RECAP datasets must expose episode_index and frame_index")
+        episode_index = int(np.asarray(sample["episode_index"]).item())
+        frame_index = int(np.asarray(sample["frame_index"]).item())
+        return {
+            **sample,
+            "value_target_bin": np.asarray(
+                self._targets.target(episode_index, frame_index),
+                dtype=np.int32,
+            ),
+        }
 
     def __len__(self) -> int:
         return len(self._dataset)
@@ -150,6 +201,10 @@ def create_torch_dataset(
 
     if data_config.prompt_from_task:
         dataset = TransformedDataset(dataset, [_transforms.PromptFromLeRobotTask(dataset_meta.tasks)])
+    if data_config.recap_sidecar_path is not None:
+        dataset = ReCAPLabelsDataset(dataset, data_config.recap_sidecar_path)
+    if data_config.recap_value_targets_path is not None:
+        dataset = ReCAPValueTargetsDataset(dataset, data_config.recap_value_targets_path)
 
     return dataset
 
@@ -262,6 +317,7 @@ def create_data_loader(
     num_batches: int | None = None,
     skip_norm_stats: bool = False,
     framework: Literal["jax", "pytorch"] = "jax",
+    drop_last: bool = True,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -299,6 +355,7 @@ def create_data_loader(
         seed=config.seed,
         skip_norm_stats=skip_norm_stats,
         framework=framework,
+        drop_last=drop_last,
     )
 
 
@@ -315,6 +372,7 @@ def create_torch_data_loader(
     num_workers: int = 0,
     seed: int = 0,
     framework: str = "jax",
+    drop_last: bool = True,
 ) -> DataLoader[tuple[_model.Observation, _model.Actions]]:
     """Create a data loader for training.
 
@@ -366,6 +424,7 @@ def create_torch_data_loader(
         num_workers=num_workers,
         seed=seed,
         framework=framework,
+        drop_last=drop_last,
     )
 
     return DataLoaderImpl(data_config, data_loader)
@@ -427,6 +486,7 @@ class TorchDataLoader:
         num_workers: int = 0,
         seed: int = 0,
         framework: str = "jax",
+        drop_last: bool = True,
     ):
         """Create a PyTorch data loader.
 
@@ -475,7 +535,7 @@ class TorchDataLoader:
             persistent_workers=num_workers > 0,
             collate_fn=_collate_fn,
             worker_init_fn=_worker_init_fn,
-            drop_last=True,
+            drop_last=drop_last,
             generator=generator,
         )
 
