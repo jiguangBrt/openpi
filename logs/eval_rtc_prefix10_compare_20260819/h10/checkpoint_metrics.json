@@ -1,0 +1,57 @@
+{
+  "metadata": {
+    "batch_size": 2,
+    "checkpoint_root": "/mnt/reacher-fast/openpi_ur_pp_202607/repo/checkpoints/pi05_marvinpro_red_cones/marvinpro_red_cones_40k_gpu67",
+    "config": "pi05_marvinpro_red_cones",
+    "dataset_frames": 4036,
+    "devices": [
+      "cuda:0"
+    ],
+    "evaluated_frames": 4036,
+    "metric_horizon": 10,
+    "model_action_horizon": 10,
+    "sample_steps": 10,
+    "seed": 20260805,
+    "steps": [
+      39999
+    ],
+    "test_episodes": [
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114
+    ]
+  },
+  "results": [
+    {
+      "action_norm_mae": 0.09722780034581072,
+      "action_norm_rmse": 0.21029960965360525,
+      "action_prefix_norm_mae": 0.09722780034581072,
+      "action_prefix_norm_rmse": 0.21029960965360525,
+      "checkpoint_step": 39999,
+      "evaluated_frames": 4036,
+      "evaluation_seconds": 565.6005347450264,
+      "gripper_chunk_mae": 0.02220613760624461,
+      "gripper_chunk_rmse": 0.09188595906127199,
+      "gripper_first_mae": 0.008475346729066247,
+      "gripper_first_rmse": 0.019256505083430752,
+      "gripper_prefix_mae": 0.02220613760624461,
+      "gripper_prefix_rmse": 0.09188595906127199,
+      "joint_chunk_mae_rad": 0.017646652919759954,
+      "joint_chunk_rmse_rad": 0.03646310502009862,
+      "joint_first_mae_rad": 0.005862793221523315,
+      "joint_first_rmse_rad": 0.010486540317229556,
+      "joint_prefix_mae_rad": 0.017646652919759954,
+      "joint_prefix_rmse_rad": 0.03646310502009862,
+      "test_flow_loss": 0.03800843046604064
+    }
+  ]
+}
