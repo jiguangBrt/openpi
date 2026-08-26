@@ -86,7 +86,12 @@ def create_rlds_dataloader(
     return data_loader, num_batches
 
 
-def main(config_name: str, max_frames: int | None = None):
+def main(
+    config_name: str,
+    max_frames: int | None = None,
+    batch_size: int = 64,
+    num_workers: int = 8,
+):
     config = _config.get_config(config_name)
     data_config = config.data.create(config.assets_dirs, config.model)
 
@@ -96,7 +101,7 @@ def main(config_name: str, max_frames: int | None = None):
         )
     else:
         data_loader, num_batches = create_torch_dataloader(
-            data_config, config.model.action_horizon, config.batch_size, config.model, config.num_workers, max_frames
+            data_config, config.model.action_horizon, batch_size, config.model, num_workers, max_frames
         )
 
     keys = ["state", "actions"]
