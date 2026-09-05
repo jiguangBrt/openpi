@@ -1240,7 +1240,7 @@ _CONFIGS = [
         num_workers=2,
         log_interval=100,
         save_interval=5_000,
-        keep_period=10_000,
+        keep_period=5_000,
     ),
     # Eval-only variant: same model/assets as pi05_marvinpro_two_red_cones but
     # the data root points at the held-out test split. Normalization stats are
