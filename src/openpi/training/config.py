@@ -1210,7 +1210,7 @@ _CONFIGS = [
             repo_id="stack_two_cones/train",
             assets=AssetsConfig(
                 assets_dir=str(_TWO_CONES_ASSETS_DIR),
-                asset_id="stack_two_cones_train",
+                asset_id="stack_two_cones/train",
             ),
             base_config=DataConfig(
                 repo_root=str(_local_dataset_root("stack_two_cones/train")),
