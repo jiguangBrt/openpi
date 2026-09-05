@@ -766,6 +766,22 @@ _SLOW_ASSETS_DIR = pathlib.Path(
     )
 )
 
+# Two-cones stacking (single train episode smoke run). The base params default
+# to the locally downloaded pi05_base under OPENPI_DATA_HOME-style cache; both
+# paths can be overridden for a different machine or checkpoint location.
+_TWO_CONES_BASE_PARAMS = pathlib.Path(
+    os.environ.get(
+        "OPENPI_TWO_CONES_BASE_PARAMS",
+        str(pathlib.Path.home() / ".cache" / "openpi" / "openpi-assets" / "checkpoints" / "pi05_base" / "params"),
+    )
+)
+_TWO_CONES_ASSETS_DIR = pathlib.Path(
+    os.environ.get(
+        "OPENPI_TWO_CONES_ASSETS_DIR",
+        str(pathlib.Path(__file__).resolve().parents[3] / "assets" / "pi05_marvinpro_two_red_cones"),
+    )
+)
+
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
@@ -1176,6 +1192,51 @@ _CONFIGS = [
         num_train_steps=80_000,
         batch_size=2,
         fsdp_devices=1,
+        num_workers=2,
+        log_interval=100,
+        save_interval=10_000,
+        keep_period=10_000,
+    ),
+    TrainConfig(
+        name="pi05_marvinpro_two_red_cones",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotMarvinProDataConfig(
+            repo_id="stack_two_cones/train",
+            assets=AssetsConfig(
+                assets_dir=str(_TWO_CONES_ASSETS_DIR),
+                asset_id="stack_two_cones_train",
+            ),
+            base_config=DataConfig(
+                repo_root=str(_local_dataset_root("stack_two_cones/train")),
+                prompt_from_task=True,
+            ),
+            use_delta_joint_actions=True,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(str(_TWO_CONES_BASE_PARAMS)),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=10,
+            discrete_state_input=True,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=8_000,
+            peak_lr=2.5e-5,
+            decay_steps=80_000,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=40_000,
+        batch_size=24,
+        fsdp_devices=6,
         num_workers=2,
         log_interval=100,
         save_interval=10_000,
