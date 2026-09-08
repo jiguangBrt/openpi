@@ -142,7 +142,7 @@ class WebsocketClientPolicy(_base_policy.BasePolicy):
                     "response_serialization_ms",
                 ):
                     value = server_timing.get(key)
-                    if isinstance(value, int | float):
+                    if isinstance(value, (int, float)):
                         server_path_ms += max(0.0, float(value))
             result["client_timing"] = {
                 "request_serialization_ms": request_serialization_ms,
