@@ -1392,6 +1392,51 @@ _CONFIGS = [
         save_interval=10_000,
         keep_period=10_000,
     ),
+    # Bottle pick-and-place (0902, new-transform data, absolute joint actions,
+    # LoRA fine-tune of pi05_base). Inference-oriented config; serve with:
+    #   uv run scripts/serve_policy.py --port=8000 policy:checkpoint \
+    #     --policy.config=pi05bottle_0902_no_delta_new_trans_data_20 \
+    #     --policy.dir=checkpoints/pi05bottle_0902_no_delta_new_trans_data_20/59999
+    # Norm stats are read from the checkpoint assets directory
+    # (59999/assets/tj_bottle/pick_and_place_bottle/norm_stats.json).
+    TrainConfig(
+        name="pi05bottle_0902_no_delta_new_trans_data_20",
+        model=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=20,
+            discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ),
+        data=LeRobotMarvinProDataConfig(
+            repo_id="tj_bottle/pick_and_place_bottle",
+            base_config=DataConfig(prompt_from_task=True),
+            use_delta_joint_actions=False,
+        ),
+        weight_loader=weight_loaders.CheckpointWeightLoader(
+            "/mnt/reacher-fast/openpi_ur_pp_202607/checkpoints/openpi-assets/checkpoints/pi05_base/params"
+        ),
+        freeze_filter=pi0_config.Pi0Config(
+            pi05=True,
+            action_horizon=20,
+            discrete_state_input=False,
+            paligemma_variant="gemma_2b_lora",
+            action_expert_variant="gemma_300m_lora",
+        ).get_freeze_filter(),
+        ema_decay=None,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=1_000,
+            peak_lr=2.5e-5,
+            decay_steps=10_000,
+            decay_lr=2.5e-6,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        num_train_steps=60_000,
+        batch_size=6,
+        save_interval=10_000,
+        keep_period=5_000,
+        wandb_enabled=False,
+    ),
     TrainConfig(
         name="pi05_ur_ping_pong",
         model=pi0_config.Pi0Config(
